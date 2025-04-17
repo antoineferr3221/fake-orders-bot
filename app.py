@@ -23,35 +23,20 @@ PANIER_MOYEN = 60
 MIN_CA = 2500
 MAX_CA = 4500
 
+# Fichier où stocker l'avancement journalier
 STORAGE_FILE = "ca_journalier.json"
-
-# Répartition du CA par créneau horaire (% du total)
-DISTRIBUTION = {
-    (8, 10): 0.05,
-    (10, 13): 0.15,
-    (13, 17): 0.30,
-    (17, 20): 0.30,
-    (20, 24): 0.20
-}
 
 
 def get_now_fr():
+    """Retourne l'heure actuelle en France"""
     utc_now = datetime.utcnow()
     france_time = utc_now + timedelta(hours=2)  # UTC+2
     return france_time
 
 
-def get_current_slot(now):
-    hour = now.hour
-    for (start, end), ratio in DISTRIBUTION.items():
-        if start <= hour < end:
-            return (start, end), ratio
-    return None, None
-
-
 def load_data():
     if not os.path.exists(STORAGE_FILE):
-        return {"date": "", "total": 0, "objectif": 0, "visites": 0, "atc": 0, "commandes": 0}
+        return {"date": "", "total": 0, "objectif": 0}
     with open(STORAGE_FILE, "r") as f:
         return json.load(f)
 
@@ -64,31 +49,17 @@ def save_data(data):
 def reset_if_new_day(data):
     today_str = get_now_fr().strftime("%Y-%m-%d")
     if data["date"] != today_str:
-        data = {
-            "date": today_str,
-            "total": 0,
-            "objectif": random.randint(MIN_CA, MAX_CA),
-            "visites": 0,
-            "atc": 0,
-            "commandes": 0
-        }
+        data["date"] = today_str
+        data["total"] = 0
+        data["objectif"] = random.randint(MIN_CA, MAX_CA)
         save_data(data)
         print(f"🔁 Nouveau jour : objectif = {data['objectif']}€")
     return data
 
 
-def simulate_visit(data):
-    data["visites"] += 1
-    if random.random() < random.uniform(0.08, 0.10):
-        data["atc"] += 1
-        print("🛒 Produit ajouté au panier.")
-    else:
-        print("👀 Visite sans ajout au panier.")
-
-
 def generate_order():
     email = fake.first_name().lower() + str(random.randint(100, 999)) + "@gmail.com"
-    quantity = random.choice([1, 2, 3])
+    quantity = random.choice([1, 2])
     total = quantity * PRODUCT_PRICE
 
     data = {
@@ -118,42 +89,31 @@ def generate_order():
 
 @app.route("/")
 def home():
-    return "🚀 Bot de visites + commandes actif."
+    return "🚀 Bot de commandes actif."
 
 
 @app.route("/run")
 def run():
     now = get_now_fr()
     heure = now.hour
-    if heure < 8 or heure >= 24:
-        return "🛑 En dehors des horaires."
+
+    if heure < 7 or heure >= 24:
+        return "🛑 En dehors des horaires autorisés."
 
     data = load_data()
     data = reset_if_new_day(data)
 
-    slot, ratio_max = get_current_slot(now)
-    if not slot:
-        return "⏱️ Créneau non couvert."
+    if data["total"] >= data["objectif"]:
+        return f"✅ Objectif atteint : {data['total']:.2f}€ / {data['objectif']}€"
 
-    simulate_visit(data)
-
-    # Vérifie le CA max autorisé pour ce créneau
-    ca_max = data["objectif"] * ratio_max
-    ca_actuel = data["total"]
-
-    if ca_actuel < ca_max and random.random() < random.uniform(0.03, 0.04):
+    # Probabilité d'achat (1 chance sur 2 par appel)
+    if random.random() < 0.5:
         montant = generate_order()
-        data["commandes"] += 1
         data["total"] += montant
+        save_data(data)
+        return f"🛒 Commande OK | Total : {data['total']:.2f}€ / {data['objectif']}€"
     else:
-        print("🚫 Pas de commande cette fois.")
-
-    save_data(data)
-
-    return (
-        f"📊 Visites : {data['visites']} | ATC : {data['atc']} | "
-        f"Commandes : {data['commandes']} | CA : {data['total']:.2f}€ / {data['objectif']}€"
-    )
+        return f"🔁 Pas de commande cette fois. Total : {data['total']:.2f}€ / {data['objectif']}€"
 
 
 if __name__ == "__main__":
